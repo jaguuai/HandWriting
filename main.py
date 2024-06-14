@@ -1,71 +1,98 @@
-
+# Step 1.1
 import os
-import requests
-import shutil
-import zipfile
+import torch
+import torchvision.transforms as transforms
+from torchvision import datasets
+import matplotlib.pyplot as plt
 
 # Define the dataset path
 dataset_path = os.path.join(os.path.expanduser('~'), '.emnist')
 
-# Check if the EMNIST dataset is already downloaded
-if not os.path.exists(dataset_path):
-    print("EMNIST dataset not found. Downloading...")
-    # Create the dataset directory if it doesn't exist
-    os.makedirs(dataset_path, exist_ok=True)
+# Transformations
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,))
+])
+
+# Download and load the training data
+train_dataset = datasets.EMNIST(root=dataset_path, split='letters', train=True, transform=transform, download=True)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
+
+# Download and load the test data
+test_dataset = datasets.EMNIST(root=dataset_path, split='letters', train=False, transform=transform, download=True)
+test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=64, shuffle=False)
+
+print("EMNIST dataset downloaded and loaded successfully!")
+# Step 1.2
+# Get the lengths of the datasets
+train_length = len(train_dataset)
+test_length = len(test_dataset)
+
+print(f"Number of training images: {train_length}")
+print(f"Number of test images: {test_length}")
+
+# To find the maximum index for training images
+print(f"Maximum index for training images: {train_length - 1}")
+
+# To find the maximum index for test images
+print(f"Maximum index for test images: {test_length - 1}")
+
+# Extract all training samples
+X_train = torch.zeros((train_length, 1, 28, 28))
+y_train = torch.zeros(train_length, dtype=torch.long)
+start_idx = 0
+
+for batch_idx, (data, target) in enumerate(train_loader):
+    batch_size = data.size(0)
+    end_idx = start_idx + batch_size
+    X_train[start_idx:end_idx] = data
+    y_train[start_idx:end_idx] = target
+    start_idx = end_idx
+
+X_test = torch.zeros((test_length, 1, 28, 28))
+y_test = torch.zeros(test_length, dtype=torch.long)
+start_idx = 0
+
+for batch_idx, (data, target) in enumerate(test_loader):
+    batch_size = data.size(0)
+    end_idx = start_idx + batch_size
+    X_test[start_idx:end_idx] = data
+    y_test[start_idx:end_idx] = target
+    start_idx = end_idx
     
-    # Download the dataset zip file
-    url = "http://www.itl.nist.gov/iaui/vip/cs_links/EMNIST/matlab.zip"
-    zip_path = os.path.join(dataset_path, "matlab.zip")
-    
-    # Try to download the file
-    try:
-        with requests.get(url, stream=True) as response:
-            response.raise_for_status()  # Check if the request was successful
-            with open(zip_path, "wb") as f:
-                shutil.copyfileobj(response.raw, f)
-        print("EMNIST dataset downloaded successfully!")
-    except Exception as e:
-        print("Error downloading EMNIST dataset:", e)
-        
-    # Try to extract the zip file
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(dataset_path)
-        print("EMNIST dataset extracted successfully!")
-    except zipfile.BadZipFile:
-        print("Error: Downloaded file is not a valid zip file.")
-    except Exception as e:
-        print("Error extracting the zip file:", e)
-    
-    # Remove the zip file
-    os.remove(zip_path)
+# Step 1.3    
+# Display a sample image
+img_index = 1000  # Update this value to look at other images
+if img_index >= len(X_train):
+    raise IndexError(f"img_index {img_index} is out of bounds for the dataset with length {len(X_train)}")
 
-# Now try to extract samples
-try:
-    from emnist import extract_training_samples
+img = X_train[img_index].numpy().squeeze()
+label = y_train[img_index].item()
+print(f"Image label: {chr(label + 96)}")
+plt.imshow(img, cmap='gray')
+plt.show()
 
-    X, y = extract_training_samples('letters')
+# Reshape images for sklearn MLP
+X_train = X_train.view(train_length, -1)
+X_test = X_test.view(test_length, -1)
 
-    # Make sure that every pixel in all of the images is a value between 0-1 
-    X = X / 255
+# Convert torch tensors to numpy arrays
+X_train = X_train.numpy()
+y_train = y_train.numpy()
+X_test = X_test.numpy()
+y_test = y_test.numpy()
 
-    # Use the first 60000 instances as training and the next 10000 as testing
-    X_train, X_test = X[:60000], X[60000:70000]
-    y_train, y_test = y[:60000], y[60000:70000]
+# Import ML libraries
+from sklearn.neural_network import MLPClassifier
 
-    # Reshape images
-    X_train = X_train.reshape(60000, 784)
-    X_test = X_test.reshape(10000, 784)
+# Create and train the MLP model
+mlpl = MLPClassifier(hidden_layer_sizes=(50,), max_iter=20, alpha=4, solver="sgd", verbose=10, tol=1e-4, random_state=1, learning_rate_init=1)
+print("Created first MLP network")
 
-    print("Extracted our samples and divided our training and testing data sets")
+# Train the model
+mlpl.fit(X_train, y_train)
 
-    import matplotlib.pyplot as plt
+# Print training and test set scores
+print("Training set score: %f" % mlpl.score(X_train, y_train))
+print("Test set score: %f" % mlpl.score(X_test, y_test))
 
-    img_index = 8888   # <<<<<You can update this value to look at other images
-    img = X_train[img_index]
-    print("Image label: " + str(chr(y_train[img_index] + 96)))
-    plt.imshow(img.reshape((28, 28)))
-    plt.show()
-
-except Exception as e:
-    print("Error:", e)
